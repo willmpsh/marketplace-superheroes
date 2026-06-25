@@ -4,12 +4,10 @@ Daily ActiveCampaign email stats report.
 
 Posts to Slack #reporting-email-marketing at 10am UK time.
 
-iOS MPP filtering approach:
-  Apple's Mail Privacy Protection pre-fetches tracking pixels, inflating raw open
-  counts. Since we can't distinguish MPP opens at the API level, we use unique
-  link clicks as a conservative "verified opens" proxy — every click proves a
-  real human opened and engaged with the email. Raw opens are shown alongside
-  for reference.
+iOS MPP filtering:
+  ActiveCampaign natively tracks verified_unique_opens — opens confirmed by
+  subsequent link clicks or other engagement signals, filtering out Apple Mail
+  Privacy Protection machine-opens. We use this field directly.
 """
 
 import os
@@ -41,29 +39,12 @@ UK_TZ = ZoneInfo("Europe/London")
 # ---------------------------------------------------------------------------
 
 def get_yesterday_uk():
-    """Return (date_str, start_utc, end_utc) for the previous UK calendar day."""
-    now_uk    = datetime.now(UK_TZ)
-    yest_uk   = now_uk - timedelta(days=1)
-    start_uk  = datetime(yest_uk.year, yest_uk.month, yest_uk.day,  0,  0,  0, tzinfo=UK_TZ)
-    end_uk    = datetime(yest_uk.year, yest_uk.month, yest_uk.day, 23, 59, 59, tzinfo=UK_TZ)
+    """Return (date_label, yesterday_date_str) for the previous UK calendar day."""
+    now_uk     = datetime.now(UK_TZ)
+    yest_uk    = now_uk - timedelta(days=1)
     date_label = yest_uk.strftime("%A, %d %B %Y")
-    return date_label, start_uk.astimezone(timezone.utc), end_uk.astimezone(timezone.utc)
-
-
-def parse_ac_datetime(value):
-    """Parse an ActiveCampaign datetime string or Unix timestamp to UTC datetime."""
-    if not value or value in ("0000-00-00 00:00:00", ""):
-        return None
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value), tz=timezone.utc)
-    # AC returns strings like "2024-06-24 09:15:00" (UTC)
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
-        try:
-            dt = datetime.strptime(value.strip(), fmt)
-            return dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
+    date_str   = yest_uk.strftime("%Y-%m-%d")   # e.g. "2026-06-24"
+    return date_label, date_str
 
 
 # ---------------------------------------------------------------------------
@@ -78,11 +59,14 @@ def ac_get(path, params=None):
     return resp.json()
 
 
-def fetch_campaigns_sent_yesterday(start_utc, end_utc):
+def fetch_campaigns_sent_yesterday(yesterday_date_str):
     """
-    Page through complete campaigns sorted by ldate DESC, collecting those
-    whose ldate (last-sent date) falls within the given UTC window.
-    Stops early once ldate goes before the window.
+    Page through complete campaigns sorted by sdate DESC, collecting those
+    whose sdate date portion matches yesterday_date_str (e.g. "2026-06-24").
+
+    AC stores sdate with the account's local timezone offset, so comparing
+    the date prefix (first 10 chars of the ISO string) matches what the AC
+    dashboard shows — no timezone conversion needed.
     """
     collected = []
     offset    = 0
@@ -91,7 +75,7 @@ def fetch_campaigns_sent_yesterday(start_utc, end_utc):
     while True:
         data  = ac_get("/campaigns", params={
             "status":         5,         # 5 = complete
-            "orders[ldate]":  "DESC",
+            "orders[sdate]":  "DESC",
             "limit":          limit,
             "offset":         offset,
         })
@@ -100,13 +84,11 @@ def fetch_campaigns_sent_yesterday(start_utc, end_utc):
             break
 
         for c in batch:
-            ldate_dt = parse_ac_datetime(c.get("ldate"))
-            if ldate_dt is None:
-                continue
-            if start_utc <= ldate_dt <= end_utc:
+            sdate = (c.get("sdate") or "")[:10]   # "2026-06-24"
+            if sdate == yesterday_date_str:
                 collected.append(c)
-            elif ldate_dt < start_utc:
-                # Sorted descending — everything after this is older, stop paging
+            elif sdate < yesterday_date_str:
+                # Sorted descending — everything here is older, stop paging
                 return collected
 
         if len(batch) < limit:
@@ -135,20 +117,17 @@ def compute_stats(campaign):
     """
     Extract send/engagement stats from an AC campaign record.
 
-    Verified opens = unique link clicks (conservative iOS-MPP-filtered proxy).
-    Suspected iOS opens = raw unique opens minus verified opens (indicative only).
+    ActiveCampaign natively provides verified_unique_opens — opens confirmed
+    by engagement signals, filtering out iOS MPP machine-opens automatically.
     """
-    sends         = safe_int(campaign.get("total_amt"))
-    raw_opens     = safe_int(campaign.get("uniqueopens"))
-    clicks        = safe_int(campaign.get("uniquelinkclicks"))
-    unsubs        = safe_int(campaign.get("unsubscribes"))
-    hard_bounces  = safe_int(campaign.get("hardbounces"))
-    soft_bounces  = safe_int(campaign.get("softbounces"))
-
-    # Clicks are the verified-open floor: a click can only happen if the email
-    # was genuinely opened by a human. Raw opens include iOS MPP pre-fetches.
-    verified_opens  = clicks
-    suspected_ios   = max(0, raw_opens - verified_opens)
+    sends            = safe_int(campaign.get("total_amt"))
+    raw_opens        = safe_int(campaign.get("uniqueopens"))
+    verified_opens   = safe_int(campaign.get("verified_unique_opens"))
+    clicks           = safe_int(campaign.get("uniquelinkclicks"))
+    unsubs           = safe_int(campaign.get("unsubscribes"))
+    hard_bounces     = safe_int(campaign.get("hardbounces"))
+    soft_bounces     = safe_int(campaign.get("softbounces"))
+    suspected_ios    = max(0, raw_opens - verified_opens)
 
     return {
         "name":               campaign.get("name", "Unnamed Campaign"),
@@ -189,8 +168,8 @@ def build_slack_blocks(date_label, stats_list):
         {
             "type": "context",
             "elements": [{"type": "mrkdwn", "text": (
-                ":information_source: *Verified opens* = unique clicks (iOS MPP filter proxy). "
-                "Raw opens shown for reference. Suspected iOS opens = raw opens minus verified opens."
+                ":information_source: *Verified opens* = ActiveCampaign's native `verified_unique_opens` "
+                "(iOS MPP machine-opens filtered out). Raw opens shown for reference."
             )}]
         },
         {"type": "divider"},
@@ -267,11 +246,10 @@ def post_to_slack(blocks, fallback_text):
 # ---------------------------------------------------------------------------
 
 def main():
-    date_label, start_utc, end_utc = get_yesterday_uk()
-    print(f"Fetching campaigns sent on {date_label} (UK time)...")
-    print(f"  UTC window: {start_utc.isoformat()} → {end_utc.isoformat()}")
+    date_label, yesterday_date_str = get_yesterday_uk()
+    print(f"Fetching campaigns sent on {date_label} (sdate = {yesterday_date_str})...")
 
-    campaigns = fetch_campaigns_sent_yesterday(start_utc, end_utc)
+    campaigns = fetch_campaigns_sent_yesterday(yesterday_date_str)
     print(f"Found {len(campaigns)} campaign(s).")
 
     stats_list = [compute_stats(c) for c in campaigns]
