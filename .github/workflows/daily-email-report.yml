@@ -1,0 +1,41 @@
+name: Daily Email Campaign Report
+
+on:
+  schedule:
+    # 09:00 UTC = 10:00 GMT (winter). During BST (summer, UTC+1) this fires at 10:00 BST.
+    # GitHub Actions cron runs in UTC; Europe/London is UTC+0 in winter, UTC+1 in summer.
+    # To always hit 10:00 London time we run at both 09:00 and 10:00 UTC and the script
+    # de-duplicates by checking whether it has already posted today.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      date_override:
+        description: 'Override "yesterday" date (YYYY-MM-DD) — leave blank for automatic'
+        required: false
+        default: ''
+
+jobs:
+  report:
+    name: Post daily email stats to Slack
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run daily email report
+        env:
+          AC_API_KEY:       ${{ secrets.AC_API_KEY }}
+          AC_API_URL:       ${{ secrets.AC_API_URL }}
+          SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
+          DATE_OVERRIDE:    ${{ github.event.inputs.date_override }}
+        run: python scripts/daily_email_report.py
