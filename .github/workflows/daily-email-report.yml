@@ -39,3 +39,16 @@ jobs:
           SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
           DATE_OVERRIDE:    ${{ github.event.inputs.date_override }}
         run: python scripts/daily_email_report.py
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "channel": "reporting-email-marketing",
+              "text": ":red_circle: *Daily Email Report failed* — check the logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }'
