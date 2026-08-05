@@ -5,6 +5,7 @@ import {
   runFacebookSync,
   runSheetsSync,
 } from "@/lib/sync-runners";
+import { toErrorMessage } from "@/lib/sync-helpers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -29,13 +30,7 @@ export async function GET(request: Request) {
   const toResult = (settled: PromiseSettledResult<unknown>) =>
     settled.status === "fulfilled"
       ? { ok: true, ...(settled.value as object) }
-      : {
-          ok: false,
-          error:
-            settled.reason instanceof Error
-              ? settled.reason.message
-              : String(settled.reason),
-        };
+      : { ok: false, error: toErrorMessage(settled.reason) };
 
   return NextResponse.json({
     activecampaign: toResult(activecampaign),
