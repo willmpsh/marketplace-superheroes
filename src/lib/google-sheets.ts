@@ -17,7 +17,11 @@ function base64url(input: Buffer | string) {
 /** Self-signed JWT → OAuth access token, so we don't need the full googleapis SDK for a read-only sync job. */
 async function getAccessToken(): Promise<string> {
   const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const now = Math.floor(Date.now() / 1000);
+  // Google rejects a JWT whose iat looks like it's in the future, and rejects
+  // it if iat is too far in the past — back-date slightly to absorb minor
+  // clock skew between the serverless host's clock and Google's, without
+  // eating into the 1-hour exp window Google enforces from iat.
+  const now = Math.floor(Date.now() / 1000) - 30;
   const claims = base64url(
     JSON.stringify({
       iss: SERVICE_ACCOUNT_EMAIL,
