@@ -8,7 +8,7 @@ import { SHEET_SOURCES } from "@/lib/sheet-sources";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   const authError = requireCronSecret(request);
   if (authError) return authError;
 
