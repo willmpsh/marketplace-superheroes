@@ -1,9 +1,21 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { inferOfferSlug } from "@/lib/offers";
 
+/**
+ * The service-role key is a static JWT (not minted per-request, so we can't back-date
+ * its iat like the Google Sheets JWT). When the signing time trails just past "now" on
+ * Supabase's side, the very first admin-client call of a cold start can be rejected as
+ * "JWT issued at future" — confirmed in production where sheets synced fine but the
+ * concurrently-run AC/Facebook syncs (which hit this same call first) both failed with
+ * that error. One retry after a short delay clears the skew window.
+ */
 export async function getOfferIdBySlugMap() {
   const supabase = createAdminClient();
-  const { data, error } = await supabase.from("offers").select("id, slug");
+  let { data, error } = await supabase.from("offers").select("id, slug");
+  if (error) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    ({ data, error } = await supabase.from("offers").select("id, slug"));
+  }
   if (error) throw error;
 
   const bySlug = new Map<string, string>();
