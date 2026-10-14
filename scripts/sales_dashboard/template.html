@@ -247,5 +247,5 @@ const chan = (rows, label) => `<thead><tr><th>${label}</th><th class="r">Sales</
 $("promos").innerHTML = chan(D.promos, "Promo");
 $("sources").innerHTML = chan(D.sources, "Source");
 
-$("foot").innerHTML = `Sales: SALES tab of the GLGP campaign sheet, ${int(D.rows)} rows. Stripe: SegMetrics Stripe integration, plans and products whose names contain "Go Live", from 1 Mar 2026. Rebuilt every morning.`;
+$("foot").innerHTML = `Sales: SALES tab of the GLGP campaign sheet, ${int(D.rows)} rows. Stripe: SegMetrics Stripe integration, plans and products whose names contain "Go Live", from 1 Mar 2026. Snapshot built ${D.generated_at}; it does not update on its own.`;
 </script>
