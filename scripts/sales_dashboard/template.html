@@ -111,8 +111,8 @@ footer { font-size: 0.78rem; color: var(--ink-3); max-width: 80ch; }
 
   <section class="panel">
     <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:baseline">
-      <h2>Stripe subscriptions and refunds</h2>
-      <span class="muted" style="font-size:0.8rem">via SegMetrics · Stripe data synced to <b class="num" id="sync"></b></span>
+      <h2>Stripe payment plans and refunds</h2>
+      <span class="muted" style="font-size:0.8rem">Direct from Stripe · pulled <b class="num" id="sync"></b></span>
     </div>
     <div class="stats" id="stripeStats"></div>
     <div class="notice" id="mismatch"></div>
@@ -120,6 +120,11 @@ footer { font-size: 0.78rem; color: var(--ink-3); max-width: 80ch; }
       <div class="scroll"><table id="plans"></table></div>
       <div class="scroll"><table id="refunds"></table></div>
     </div>
+  </section>
+
+  <section class="panel">
+    <h2>By product</h2>
+    <div class="scroll"><table id="products"></table></div>
   </section>
 
   <div class="grid2">
@@ -224,28 +229,30 @@ $("status").innerHTML = st + "</tbody>";
 
 // Stripe
 const S = D.stripe, T0 = S.totals;
-$("sync").textContent = S.synced_until || "unknown";
+const RT = S.refund_totals;
+$("sync").textContent = S.synced_at;
 $("stripeStats").innerHTML = [
-  [int(T0.active), "active subscriptions"],
-  [int(T0.cancelled), "cancelled"],
-  [usd(T0.refunded), "refunded"],
-  [usd(T0.mrr), "active MRR"],
+  [int(T0.active), "active, paying"],
+  [int(T0.at_risk), "past due or unpaid"],
+  [int(T0.completed), "completed all payments"],
+  [int(T0.cancelled), "cancelled early"],
+  [usd(RT.amount), `refunded · ${int(RT.customers)} buyers`],
 ].map(([b, s]) => `<div class="stat"><b>${b}</b><span>${s}</span></div>`).join("");
 const sheetActive = types.reduce((a, t) => a + ((D.status[t] || {}).ACTIVE || 0), 0);
-const sheetCancel = types.reduce((a, t) => a + ((D.status[t] || {}).CANCELLED || 0), 0);
-$("mismatch").innerHTML = `<strong>These do not match the sheet.</strong> The sheet shows <b class="num">${sheetActive}</b> active and <b class="num">${sheetCancel}</b> cancelled; Stripe (via SegMetrics) shows <b class="num">${T0.active}</b> active and <b class="num">${T0.cancelled}</b> cancelled across every plan with "Go Live" in its name, including Elite plans that are not on the SALES tab. Treat neither as final until the gap is reconciled in Stripe.`;
-$("plans").innerHTML = `<thead><tr><th>Plan</th><th class="r">Active</th><th class="r">Cancelled</th><th class="r">MRR</th></tr></thead><tbody>` +
-  S.plans.map(p => `<tr><td>${esc(p.plan)}</td><td class="r">${p.active}</td><td class="r">${p.cancelled}</td><td class="r">${usd(p.mrr)}</td></tr>`).join("") +
-  `</tbody><tfoot><tr><td>Total</td><td class="r">${T0.active}</td><td class="r">${T0.cancelled}</td><td class="r">${usd(T0.mrr)}</td></tr></tfoot>`;
-$("refunds").innerHTML = `<thead><tr><th>Refunded product</th><th class="r">Amount</th></tr></thead><tbody>` +
-  S.refunds.map(r => `<tr><td>${esc(r.product)}</td><td class="r">${usd(r.amount)}</td></tr>`).join("") +
-  `</tbody><tfoot><tr><td>Total since 1 Mar 2026</td><td class="r">${usd(T0.refunded)}</td></tr></tfoot>`;
+$("mismatch").innerHTML = `<strong>The sheet's STATUS column is behind Stripe.</strong> The sheet shows <b class="num">${sheetActive}</b> active plans; Stripe shows <b class="num">${T0.active}</b> active and <b class="num">${T0.at_risk}</b> past due or unpaid. The sheet shows <b class="num">${D.sheet_refund_buyers}</b> refunded buyers; Stripe shows <b class="num">${RT.customers}</b>. Use the Stripe figures for plan status and refunds.`;
+$("plans").innerHTML = `<thead><tr><th>Payment plans</th><th class="r">Active</th><th class="r">At risk</th><th class="r">Completed</th><th class="r">Cancelled</th></tr></thead><tbody>` +
+  S.plans.map(p => `<tr><td>${esc(p.plan)}</td><td class="r">${p.active}</td><td class="r">${p.at_risk || "·"}</td><td class="r">${p.completed || "·"}</td><td class="r">${p.cancelled || "·"}</td></tr>`).join("") +
+  `</tbody><tfoot><tr><td>Total</td><td class="r">${T0.active}</td><td class="r">${T0.at_risk}</td><td class="r">${T0.completed}</td><td class="r">${T0.cancelled}</td></tr></tfoot>`;
+$("refunds").innerHTML = `<thead><tr><th>Refunds</th><th class="r">Count</th><th class="r">Amount</th></tr></thead><tbody>` +
+  S.refunds.map(r => `<tr><td>${esc(r.product)}</td><td class="r">${r.n}</td><td class="r">${usd(r.amount)}</td></tr>`).join("") +
+  `</tbody><tfoot><tr><td>Total since 1 Mar 2026</td><td class="r">${RT.n}</td><td class="r">${usd(RT.amount)}</td></tr></tfoot>`;
 
 // Channels
 const chan = (rows, label) => `<thead><tr><th>${label}</th><th class="r">Sales</th><th class="r">Plat.</th><th class="r">Refunds</th><th class="r">Amount</th></tr></thead><tbody>` +
   rows.map(r => `<tr><td>${esc(r.key)}</td><td class="r">${r.sales}</td><td class="r">${r.platinum}</td><td class="r">${r.refunds} <span class="muted">${r.sales ? pct(r.refunds / r.sales) : ""}</span></td><td class="r">${usd(r.amount)}</td></tr>`).join("") + "</tbody>";
+$("products").innerHTML = chan(D.products, "Product");
 $("promos").innerHTML = chan(D.promos, "Promo");
 $("sources").innerHTML = chan(D.sources, "Source");
 
-$("foot").innerHTML = `Sales: SALES tab of the GLGP campaign sheet, ${int(D.rows)} rows. Stripe: SegMetrics Stripe integration, plans and products whose names contain "Go Live", from 1 Mar 2026. Snapshot built ${D.generated_at}; it does not update on its own.`;
+$("foot").innerHTML = `Sales: SALES tab of the GLGP campaign sheet, ${int(D.rows)} rows. Stripe: account "Marketplace SuperHeroes", every GLGP, Platinum and 4 Digit Christmas payment plan (Elite excluded). "Completed" means the plan ended within 5 days of its final scheduled payment; any earlier end counts as cancelled. Pay-in-full sales have no plan, so they appear only in the sales figures. Snapshot built ${D.generated_at}; it does not update on its own.`;
 </script>

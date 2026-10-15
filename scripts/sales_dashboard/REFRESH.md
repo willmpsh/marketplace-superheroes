@@ -1,23 +1,23 @@
-# Daily refresh: GLGP Sales Board
+# Refresh: GLGP Sales Board
 
 Artifact: https://claude.ai/artifact/4fQiaVbMg2tq19AJvHjmog
+Needs the Google Drive and Stripe connectors. Work in a scratchpad directory; tool results too big to inline are saved to files, read them with jq.
 
-1. Google Drive `download_file_content`, fileId `1vsDz6o78A-CP23ctFN4luKGOLv4s1YiZqvJhElqzpdA`,
+1. **Sheet.** Google Drive `download_file_content`, fileId `1vsDz6o78A-CP23ctFN4luKGOLv4s1YiZqvJhElqzpdA`,
    exportMimeType `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
-   The result is too big to inline; base64-decode its `content` field to `sheet.xlsx`.
-2. SegMetrics `get-account-info`: take `data_summary.data_until` (date part) as `synced_until`.
-3. SegMetrics `run-query` (subscriptions):
-   type `subscriptions`, metrics `["subscriptions","subscriptions_all","cancellations","mrr"]`,
-   dimensions `["subscriptions.product_name"]`,
-   filters `[{"id":"subscriptions.product_name","type":"PT","value":"Go Live"}]`,
-   date_range `2026-03-01` to today.
-4. SegMetrics `run-query` (refunds):
-   type `revenue`, metrics `["refunds"]`, dimensions `["orders.product_name"]`,
-   filters `[{"id":"orders.product_name","type":"PT","value":"Go Live"}]`,
-   date_range `2026-03-01` to today.
-5. Write `stripe.json` as `{"synced_until": ..., "subscriptions": <step 3 result>, "refunds": <step 4 result>}`.
-6. `pip install openpyxl pandas` then
+   Base64-decode its `content` field to `sheet.xlsx`.
+2. **Stripe subscriptions.** Account `acct_1RQOYXIe8YWauukx`, livemode true. `stripe_api_read` `GetSubscriptionsSearch` with
+   `limit: 100` and query
+   `metadata['thrivecart_product_id']:'164' OR metadata['thrivecart_product_id']:'166' OR metadata['thrivecart_product_id']:'168' OR metadata['thrivecart_product_id']:'193' OR metadata['thrivecart_product_id']:'198' OR metadata['thrivecart_product_id']:'203'`.
+   Repeat with `page: <next_page>` until `has_more` is false. Flatten every page into one file:
+   `jq -s '[.[].data[] | {id, status, product: .plan.product, rebills: .metadata.thrivecart_fixed_rebills, created, ended_at, reason: .cancellation_details.reason}]' page*.json > subs.json`
+3. **Stripe refunds.** Same account. `GetRefunds` with `limit: 100`, `created: {gte: 1772323200}`, `expand: ["data.charge"]`;
+   repeat with `starting_after: <last id>` until `has_more` is false. Flatten:
+   `jq -s '[.[].data[] | {id, amount, status, created, desc: .charge.description, customer: .charge.customer}]' refund*.json > refunds.json`
+4. `pip install openpyxl pandas`, then
+   `python scripts/sales_dashboard/stripe_summary.py subs.json refunds.json stripe.json` and
    `python scripts/sales_dashboard/build.py sheet.xlsx stripe.json glgp-sales.html`.
-7. Artifact `read` the URL above, then publish `glgp-sales.html` with that `url`.
+5. Artifact `read` the URL above, then publish `glgp-sales.html` with that `url`.
 
+A new GLGP offer means a new Stripe product: add its ThriveCart product id to the query in step 2 and its Stripe product id to `PRODUCTS` in `stripe_summary.py`.
 If any step fails, do not publish a partial page; report which step failed.

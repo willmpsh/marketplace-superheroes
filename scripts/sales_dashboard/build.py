@@ -1,10 +1,10 @@
-"""Build the GLGP sales dashboard HTML from the campaign sheet and SegMetrics Stripe data.
+"""Build the GLGP sales dashboard HTML from the campaign sheet and Stripe data.
 
 Usage:
     python build.py <sheet.xlsx> <stripe.json> <out.html> [--today YYYY-MM-DD]
 
 <sheet.xlsx>  export of "MPSH // Campaign Stats // WhatNot // Go Live Get Paid"
-<stripe.json> {"synced_until": "...", "subscriptions": <run-query result>, "refunds": <run-query result>}
+<stripe.json> output of stripe_summary.py
 
 Only aggregates are written into the page: no names or emails.
 """
@@ -103,39 +103,16 @@ def build(df, stripe, today):
         },
         "days": days,
         "status": status,
+        "products": group("PRODUCT"),
         "promos": group("PROMO"),
+        "sheet_refund_buyers": int(df.loc[df["STATUS"] == "REFUND", "EMAIL"].str.lower().nunique()),
         "sources": group("SOURCE", top=12),
         "stripe": stripe_block(stripe),
     }
 
 
 def stripe_block(stripe):
-    subs = stripe["subscriptions"]
-    refunds = stripe["refunds"]
-    return {
-        "synced_until": stripe.get("synced_until"),
-        "plans": [
-            {
-                "plan": r["subscriptions.product_name"],
-                "active": int(r["subscriptions"]),
-                "all": int(r["subscriptions_all"]),
-                "cancelled": int(r["cancellations"]),
-                "mrr": float(r["mrr"]),
-            }
-            for r in subs["rows"]
-        ],
-        "totals": {
-            "active": int(subs["totals"]["subscriptions"]),
-            "all": int(subs["totals"]["subscriptions_all"]),
-            "cancelled": int(subs["totals"]["cancellations"]),
-            "mrr": float(subs["totals"]["mrr"]),
-            "refunded": float(refunds["totals"]["refunds"]),
-        },
-        "refunds": [
-            {"product": r["orders.product_name"], "amount": float(r["refunds"])}
-            for r in refunds["rows"] if float(r["refunds"]) > 0
-        ],
-    }
+    return stripe  # already summarised by stripe_summary.py
 
 
 def main():
