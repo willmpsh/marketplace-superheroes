@@ -1,12 +1,6 @@
 name: Daily Email Campaign Report
 
 on:
-  schedule:
-    # 09:00 UTC = 10:00 GMT (winter). During BST (summer, UTC+1) this fires at 10:00 BST.
-    # GitHub Actions cron runs in UTC; Europe/London is UTC+0 in winter, UTC+1 in summer.
-    # To always hit 10:00 London time we run at both 09:00 and 10:00 UTC and the script
-    # de-duplicates by checking whether it has already posted today.
-    - cron: '0 9 * * *'
   workflow_dispatch:
     inputs:
       date_override:
